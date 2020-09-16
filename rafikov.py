@@ -59,6 +59,73 @@ def surface_density(k, resolution=[600,600], w=20, showy=False,gauss=False):
     
     return dens, xpos, ypos
 
+def radial_surf_dens(radius,dens,xpos,ypos,bins=101,showy=False,m=5):
+#way of defining and accessing surface density through a radial parametrization
+    
+    w = np.max(xpos)-np.min(ypos)
+    rpc = np.zeros((np.size(xpos),np.size(ypos)))
+    for i in range(np.size(xpos)):
+        for j in range(np.size(ypos)):
+            rpc[i,j] = np.sqrt(xpos[i]**2 + ypos[j]**2) 
+
+    robj = np.zeros(bins-1)
+    dens_grid = np.zeros(bins-1)
+    R = np.linspace(0,w/2,bins)
+    
+    for i in range(np.size(R)-1):
+        (xi,yi) = np.where((rpc<=R[i+1]) & (rpc>R[i]))
+        count = np.size(xi)
+        avg_dens = np.sum(dens[xi,yi])/count
+        dens_grid[i] = avg_dens
+        robj[i] = (R[i+1]+R[i])/2
+
+    step = (bins-1)/4
+    step = int(step)
+    ministep = int(step/2)+1
+        
+    r1 = robj[:ministep]
+    d1 = dens_grid[:ministep]
+    r2 = robj[ministep-1:step]
+    d2 = dens_grid[ministep-1:step]
+    r3 = robj[step-1:2*step]
+    d3 = dens_grid[step-1:2*step]
+    r4 = robj[2*step-1:4*step]
+    d4 = dens_grid[2*step-1:4*step]
+    
+    #We do spline and differentiate in every interval
+    spl1 = UnivariateSpline(r1, d1, k=m)
+    spl2 = UnivariateSpline(r2, d2, k=m)
+    spl3 = UnivariateSpline(r3, d3, k=m)
+    spl4 = UnivariateSpline(r4, d4, k=m)
+    sg = np.concatenate((spl1(r1[:-1]),spl2(r2[:-1]),spl3(r3[:-1]),spl4(r4)))
+
+    if showy:
+        plt.figure()
+        plt.xlabel(r'$R\:\:\:[pc]$')
+        plt.ylabel(r'$\Sigma(R)\:\:\: \left[\frac{g}{cm^2}\right]$')
+        
+        plt.plot(robj,dens_grid,'.')
+        # plt.plot(r1,spl1(r1))
+        # plt.plot(r2,spl2(r2))
+        # plt.plot(r3,spl3(r3))
+        # plt.plot(r4,spl4(r4))
+        plt.plot(robj,sg)
+        plt.show()
+        return 'plotted'
+
+    if (0 < R) | (R < r1[-1]):
+        return spl1(R)
+    elif (r2[0] <= R) | (R < r2[-1]):
+        return spl2(R)
+    elif (r3[0] <= R) | (R < r3[-1]):
+        return spl3(R)
+    elif (r4[0] <= R) | (R <= r4[-1]):
+        return spl4(R)
+    else:
+        return 'Seems like the radius is outside our range defined at the FRB'
+        
+    
+
 def omega(k, resolution=[600,600], w=20, showy=False,gauss=False):
     
     nmbr = "000" + str(k+1)
@@ -98,7 +165,7 @@ def omega(k, resolution=[600,600], w=20, showy=False,gauss=False):
 
     return vels/rcm, xpos, ypos, rpc
 
-def setup_omega(k, bins=101, resolution=[600,600], w=20, m=3,showy=False):
+def setup_omega(k, bins=101, resolution=[600,600], w=20, m=5,showy=False):
     oms, x, y, r = omega(k,resolution,w)
     
     robj = np.zeros(bins-1)
@@ -115,21 +182,21 @@ def setup_omega(k, bins=101, resolution=[600,600], w=20, m=3,showy=False):
     
     step = (bins-1)/4
     step = int(step)
+    ministep = int(step/2)+1
+
     
     #4-interval-split for interpolating different regimes
     
-    #Lazy programming here, it shouldn't be 1:13, but a fraction of step
-    #I just don't want any formatting errors, and 101 binsize seems ok
-    r1 = robj[1:13]
-    om1 = omegs[1:13]
-    r2 = robj[12:step]
-    om2 = omegs[12:step]
+    r1 = robj[1:ministep]
+    om1 = omegs[1:ministep]
+    r2 = robj[ministep-1:step]
+    om2 = omegs[ministep-1:step]
     r3 = robj[step-1:2*step]
     om3 = omegs[step-1:2*step]
     r4 = robj[2*step-1:4*step]
     om4 = omegs[2*step-1:4*step]
     
-    #We do spline and differentiate in every interval
+    #We do a spline interpolation and differentiate in every interval
     spl1 = UnivariateSpline(r1, om1, k=m)
     spl_der1 = spl1.derivative()
     spl2 = UnivariateSpline(r2, om2, k=m)
@@ -158,13 +225,14 @@ def setup_omega(k, bins=101, resolution=[600,600], w=20, m=3,showy=False):
         plt.plot(r4,spl4(r4))
         plt.show()
     
-        deriv1 = UnivariateSpline(r1,dp1)
-        deriv2 = UnivariateSpline(r2,dp2)
-        deriv3 = UnivariateSpline(r3,dp3)
-        deriv4 = UnivariateSpline(r4,dp4)
-        
-        deriv = np.concatenate((deriv1(r1[:-1]),deriv2(r2[:-1]),deriv3(r3[:-1]),deriv4(r4)))
-        
+    deriv1 = UnivariateSpline(r1,dp1)
+    deriv2 = UnivariateSpline(r2,dp2)
+    deriv3 = UnivariateSpline(r3,dp3)
+    deriv4 = UnivariateSpline(r4,dp4)
+    
+    deriv = np.concatenate((deriv1(r1[:-1]),deriv2(r2[:-1]),deriv3(r3[:-1]),deriv4(r4)))
+    
+    if showy:    
         plt.figure()
         plt.xlabel(r'$R\:\:\:[pc]$')
         plt.ylabel(r'$\frac{d\Omega(R)}{dR}\:\:\: \left[\frac{1}{s}\right]$')
@@ -194,19 +262,9 @@ def r_der_omega(k, R, bins=101, resolution=[600,600], w=20, preload=False):
         return d4(R)
     else:
         return 'Seems like the radius is outside our range defined at the FRB'
-
-
-
     
-    
-    
-    
-
-
-
-
-
-
-
+def momentum_flux(k,R,ders,b):
+#The whole point here is to profile this, so it's always with preload :)
+    pass
 
 
