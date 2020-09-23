@@ -28,8 +28,12 @@ class SMBHpair(object):
         self.eddington_rate = 'none'
         self.binary_instance_info = 'No snapshot query yet'
         self.merger_alert = np.nan
-        self.N = simulation_n
-        
+
+        if type(simulation_n)==int:
+            self.N = simulation_n
+        elif type(simulation_n)==list:
+            self.N = simulation_n[-1]-simulation_n[0]
+            
         self.title = ''
         if title != 'none':
             self.title = title+': '
@@ -41,7 +45,11 @@ class SMBHpair(object):
         #orbital is the orbital time of the binary in [kyr] units
         self.torb = orbital
         self.dt = dt
-        self.times = np.linspace(0,(simulation_n-1)*dt*10/orbital,simulation_n)
+        if type(simulation_n)==int:
+            self.times = np.linspace(0,(simulation_n-1)*dt*10/orbital,simulation_n)
+        elif type(simulation_n)==list:
+            self.times = np.linspace((simulation_n[0]-1)*dt*10/orbital,
+                                     (simulation_n[-1]-1)*dt*10/orbital,(simulation_n[-1]-simulation_n[0]))
 
         if comp_path == 'none':
         #This assumes I'm getting info from my HD in a specified format :D
@@ -51,14 +59,23 @@ class SMBHpair(object):
             root = comp_path
         
         self.sink_directories = []
-        for i in range(simulation_n):
-            number = '000' + str(i+1)
-            if len(str(i+1))==1:
-                number = "0000" + str(i+1)
-            elif len(str(i+1))==3:
-                number = "00" + str(i+1)
-            self.sink_directories.append(root+number+'/sink_'+number+'.csv')
+        if type(simulation_n)==int:
+            for i in range(simulation_n):
+                number = '000' + str(i+1)
+                if len(str(i+1))==1:
+                    number = "0000" + str(i+1)
+                elif len(str(i+1))==3:
+                    number = "00" + str(i+1)
+                self.sink_directories.append(root+number+'/sink_'+number+'.csv')
          
+        elif type(simulation_n)==list:
+            for i in range(simulation_n[0],simulation_n[-1]):
+                number = '000' + str(i+1)
+                if len(str(i+1))==1:
+                    number = "0000" + str(i+1)
+                elif len(str(i+1))==3:
+                    number = "00" + str(i+1)
+                self.sink_directories.append(root+number+'/sink_'+number+'.csv')            
 
             
     def spatial(self, a_graph=False, p_graph=False, path_graph=False):
@@ -285,7 +302,6 @@ class SMBHpair(object):
         except:
             "No merger mass available. Maybe try calling .feeding"
         pass
-            
             
             
             

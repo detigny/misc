@@ -23,7 +23,7 @@ from scipy.interpolate import *
 
 from SMBH import *
 
-def surface_density(k, resolution=[600,600], w=20, showy=False,gauss=False):
+def surface_density(k, resolution=[800,800], w=20, showy=False,gauss=False):
     
     nmbr = "000" + str(k+1)
     if len(str(k+1))==1:
@@ -50,11 +50,14 @@ def surface_density(k, resolution=[600,600], w=20, showy=False,gauss=False):
     
     if showy:
         ex =  (-w/2, w/2, -w/2,w/2)
+        plt.figure()
         plt.xlabel('$x\:[pc]$')
         plt.ylabel('$y\:[pc]$')
         plt.imshow(dens,extent=ex)
-    
         plt.colorbar().set_label(r'Surface Density $\Sigma(x,y)\:\:\: \left[\frac{g}{cm^2}\right]$')
+        plt.savefig('imtest.png')
+        plt.close()
+
         return 'plotted'
     
     return dens, xpos, ypos
@@ -157,6 +160,7 @@ def omega(k, resolution=[600,600], w=20, showy=False,gauss=False):
     
     if showy:
         ex =  (-w/2, w/2, -w/2,w/2)
+        plt.figure()
         plt.xlabel('$x\:[pc]$')
         plt.ylabel('$y\:[pc]$')
         plt.imshow(vels/rcm,extent=ex,norm=col.LogNorm())
@@ -165,7 +169,7 @@ def omega(k, resolution=[600,600], w=20, showy=False,gauss=False):
 
     return vels/rcm, xpos, ypos, rpc
 
-def setup_omega(k, bins=101, resolution=[600,600], w=20, m=5,showy=False):
+def setup_omega(k, bins=101, resolution=[800,800], w=20, m=5,showy=False):
     oms, x, y, r = omega(k,resolution,w)
     
     robj = np.zeros(bins-1)
