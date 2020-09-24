@@ -19,11 +19,13 @@ import matplotlib.cm as cm
 import matplotlib.colors as col
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.interpolate import *
+from scipy.optimize import curve_fit 
+from cmath import *
 
 
 from SMBH import *
 
-def surface_density(k, resolution=[800,800], w=20, showy=False,gauss=False):
+def surface_density(k, resolution=[800,800], w=20, showy=False,gauss=False,imname='None',lims='None'):
     
     nmbr = "000" + str(k+1)
     if len(str(k+1))==1:
@@ -50,13 +52,19 @@ def surface_density(k, resolution=[800,800], w=20, showy=False,gauss=False):
     
     if showy:
         ex =  (-w/2, w/2, -w/2,w/2)
-        plt.figure()
+        plt.figure(1)
         plt.xlabel('$x\:[pc]$')
         plt.ylabel('$y\:[pc]$')
-        plt.imshow(dens,extent=ex)
+        if lims=='None':
+            plt.imshow(dens,extent=ex,norm=col.LogNorm())
+        else:
+            plt.imshow(dens,extent=ex,norm=col.LogNorm(lims[0],lims[1]))
+            
         plt.colorbar().set_label(r'Surface Density $\Sigma(x,y)\:\:\: \left[\frac{g}{cm^2}\right]$')
-        plt.savefig('imtest.png')
-        plt.close()
+        
+        if imname!='None':
+            plt.savefig(imname)
+            plt.close(1)
 
         return 'plotted'
     
@@ -107,12 +115,12 @@ def radial_surf_dens(radius,dens,xpos,ypos,bins=101,showy=False,m=5):
         plt.xlabel(r'$R\:\:\:[pc]$')
         plt.ylabel(r'$\Sigma(R)\:\:\: \left[\frac{g}{cm^2}\right]$')
         
-        plt.plot(robj,dens_grid,'.')
+        plt.plot(robj,dens_grid,'.',color='blue')
         # plt.plot(r1,spl1(r1))
         # plt.plot(r2,spl2(r2))
         # plt.plot(r3,spl3(r3))
         # plt.plot(r4,spl4(r4))
-        plt.plot(robj,sg)
+        plt.plot(robj,sg,color,'red')
         plt.show()
         return 'plotted'
 
@@ -160,7 +168,6 @@ def omega(k, resolution=[600,600], w=20, showy=False,gauss=False):
     
     if showy:
         ex =  (-w/2, w/2, -w/2,w/2)
-        plt.figure()
         plt.xlabel('$x\:[pc]$')
         plt.ylabel('$y\:[pc]$')
         plt.imshow(vels/rcm,extent=ex,norm=col.LogNorm())
@@ -169,7 +176,7 @@ def omega(k, resolution=[600,600], w=20, showy=False,gauss=False):
 
     return vels/rcm, xpos, ypos, rpc
 
-def setup_omega(k, bins=101, resolution=[800,800], w=20, m=5,showy=False):
+def setup_omega(k, bins=101, resolution=[600,600], w=20, m=5,showy=False):
     oms, x, y, r = omega(k,resolution,w)
     
     robj = np.zeros(bins-1)
@@ -267,8 +274,114 @@ def r_der_omega(k, R, bins=101, resolution=[600,600], w=20, preload=False):
     else:
         return 'Seems like the radius is outside our range defined at the FRB'
     
-def momentum_flux(k,R,ders,b):
-#The whole point here is to profile this, so it's always with preload :)
-    pass
+def fourier_model(x,*A):
+    s = A[0]
+    for i in range(int((len(A)-1)/2)):
+        s = s + A[i+1]*np.cos((i+1)*x)
+    for i in range(int((len(A)-1)/2)+1,len(A)):
+        s = s + A[i]*np.sin((i+1)*x)
+    return s
+
+def r_squared(ydata,yest):
+    squared = np.sum((ydata-yest)**2)
+    tot = np.sum((ydata-np.mean(ydata))**2)
+    return 1 - squared/tot
+
+def xi_squared(ydata,yest):
+    res = (ydata-yest)**2
+    return np.sum(res/yest)
+        
+    
+def fourier_quality(dens,xpos,ypos,fou_deg=4,bins=20,bins2='None',showy=False,profs=[]):
+#With this function we measure the fourier modes for the surf-density isocurves
+#This is a way to measure the non axisymmetric density perturbations :) 
+#If we set a bins2 value, it makes the radial rings coarser by binning, and so
+#The Fourier fit is done over a smaller sample value.. BE CAUTIOUS WITH THIS
+    
+    w = np.max(xpos)-np.min(xpos)
+    rpc = np.zeros((np.size(xpos),np.size(ypos)))
+    for i in range(np.size(xpos)):
+        for j in range(np.size(ypos)):
+            rpc[i,j] = np.sqrt(xpos[i]**2 + ypos[j]**2) 
+
+    robj = np.zeros(bins-1)
+    R = np.linspace(0,w/2,bins)
+    
+    K = []
+    vals = []
+    vals2 = []
+    
+    for i in range(np.size(profs)):
+        K.append(np.argmin(np.abs(R-profs[i])))
+    K = np.array(K)
+    xpos = np.array(xpos)
+    ypos = np.array(ypos)
+    
+    for i in range(np.size(R)-1):
+        phi = []
+        (xi,yi) = np.where((rpc<=R[i+1]) & (rpc>R[i]))
+        for l in range(len(xi)):
+            dum = complex(xpos[xi[l]],ypos[yi[l]])
+            pol = polar(dum)[1]
+            if pol<0:
+                pol = 2*np.pi+pol
+            phi.append(pol)
+            
+        a0 = np.sum(dens[xi,yi])/np.size(xi)
+        a_guess = a0/np.geomspace(10,100**fou_deg,fou_deg)
+        A = np.array((a0,*a_guess,*a_guess))
+        
+        if ((type(bins2)==int) & (bins2>3*fou_deg)):
+            bin_dens = []
+            binned_phi = np.linspace(0,2*np.pi,bins2)
+            for m in range(bins2-1):
+                M = np.where((phi<=binned_phi[m+1]) & (phi>binned_phi[m]))
+                bin_dens.append(np.mean(dens[xpos[xi[M]],ypos[yi[M]]]))
+            bin_dens = np.array(bin_dens)
+            vals2.append(curve_fit(fourier_model,binned_phi,bin_dens,p0=A)[0])
+                
+        vals.append(curve_fit(fourier_model, phi, dens[xi,yi],p0=A)[0])
+        robj[i] = (R[i+1]+R[i])/2
+        
+        if np.size(np.where(K==i)[0])==1:
+            j = int(np.where(K==i)[0])
+            rtit = profs[j]
+            X = np.linspace(0,2*np.pi,200)
+            Y = fourier_model(X,*vals[i])
+            yest = fourier_model(np.array(phi),*vals[i])
+            yres =r_squared(dens[xi,yi],yest)
+            R1 = str(round(R[i],3))
+            R2 = str(round(R[i+1],3))
+            Rscore = str(round(yres,4))
+            plt.figure()
+            plt.title(r'profile for ' + str(rtit) + r'$\in$[' + R1 + ', '
+                      + R2 + '],' + ' with $R^2=$' + Rscore)
+            plt.xlabel(r'$\phi$')
+            plt.ylabel(r'Surface Density $\Sigma_R(\theta)\:\:\: \left[\frac{g}{cm^2}\right]$')
+            plt.plot(phi, dens[xi,yi], '.',color='blue',markersize=5)
+            plt.plot(X,Y,'red')
+            plt.legend(['values','fourier fit'])
+            plt.show()
+    
+    vals = np.array(vals)
+    if showy:
+        plt.figure()
+        plt.yscale('log')
+        plt.xlabel('R [pc]')
+        plt.plot(robj,vals[:,0],label='a0')
+        for k in range(fou_deg):
+            plt.plot(robj,vals[:,k+1],label='a'+str(k+1))
+            plt.plot(robj,vals[:,k+5],label='b'+str(k+1))
+        plt.legend()
+        plt.show()
+        return 'plotted'
+    return robj, vals
+            
+    
+    
 
 
+
+    
+    
+    
