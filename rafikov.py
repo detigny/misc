@@ -20,6 +20,8 @@ import matplotlib.colors as col
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.interpolate import *
 from scipy.optimize import curve_fit 
+from scipy import stats as stats
+from basic_units import radians 
 from cmath import *
 
 
@@ -70,8 +72,11 @@ def surface_density(k, resolution=[800,800], w=20, showy=False,gauss=False,imnam
     
     return dens, xpos, ypos
 
-def radial_surf_dens(radius,dens,xpos,ypos,bins=101,showy=False,m=5):
+def radial_surf_dens(dens,xpos,ypos,bins=101,showy=False,m=5,Mswitch=False):
 #way of defining and accessing surface density through a radial parametrization
+#The interpolation is split in stages in a way which falls apart when the 
+#radius is too big. Here you would need more interpolation stages so there are
+#No big discontinuities (The central regime is too different to outer regions)
     
     w = np.max(xpos)-np.min(ypos)
     rpc = np.zeros((np.size(xpos),np.size(ypos)))
@@ -88,6 +93,8 @@ def radial_surf_dens(radius,dens,xpos,ypos,bins=101,showy=False,m=5):
         count = np.size(xi)
         avg_dens = np.sum(dens[xi,yi])/count
         dens_grid[i] = avg_dens
+        if Mswitch:
+            dens_grid[i] = avg_dens*np.pi*(R[i+1]**2-R[i]**2)*4788
         robj[i] = (R[i+1]+R[i])/2
 
     step = (bins-1)/4
@@ -114,13 +121,17 @@ def radial_surf_dens(radius,dens,xpos,ypos,bins=101,showy=False,m=5):
         plt.figure()
         plt.xlabel(r'$R\:\:\:[pc]$')
         plt.ylabel(r'$\Sigma(R)\:\:\: \left[\frac{g}{cm^2}\right]$')
+#        plt.ylim([1e-2,3])
+        if Mswitch:
+            plt.ylabel(r'$M(R)\:\:\:[M_\odot]$')
+#        plt.yscale('log')
         
-        plt.plot(robj,dens_grid,'.',color='blue')
+        plt.plot(robj,dens_grid,color='blue')
         # plt.plot(r1,spl1(r1))
         # plt.plot(r2,spl2(r2))
         # plt.plot(r3,spl3(r3))
         # plt.plot(r4,spl4(r4))
-        plt.plot(robj,sg,color,'red')
+#        plt.plot(robj,sg,color='red')
         plt.show()
         return 'plotted'
 
@@ -171,7 +182,7 @@ def omega(k, resolution=[600,600], w=20, showy=False,gauss=False):
         plt.xlabel('$x\:[pc]$')
         plt.ylabel('$y\:[pc]$')
         plt.imshow(vels/rcm,extent=ex,norm=col.LogNorm())
-        plt.colorbar().set_label(r'$\Omega(R)\:\:\: \left[\frac{1}{s}\right]$')
+        plt.colorbar().set_label(r'$\Omega(x,y)\:\:\: \left[\frac{1}{s}\right]$')
         return 'plotted'
 
     return vels/rcm, xpos, ypos, rpc
@@ -274,6 +285,39 @@ def r_der_omega(k, R, bins=101, resolution=[600,600], w=20, preload=False):
     else:
         return 'Seems like the radius is outside our range defined at the FRB'
     
+def temperature(k, resolution=[600,600], w=20, showy=False,gauss=False):
+    
+    nmbr = "000" + str(k+1)
+    if len(str(k+1))==1:
+        nmbr = "0000" + str(k+1)
+    elif len(str(k+1))==3:
+        nmbr = '00'+str(k+1)
+    ds = runner(nmbr)
+    
+#Same rationale as with density, but here we integrate tangential velocity 
+#with a weighting by the density field and then normalizing. Omega is then
+#calculated in norm, by division of the radius
+    width = (w,'pc')
+    surf = ds.proj("temperature", 'z',weight_field='density')
+    frb = surf.to_frb(width,resolution)
+    if(gauss):
+        frb.apply_gauss_beam(nbeam=30, sigma=2.0)
+    
+    T = np.flip(np.array(frb['temperature'].in_units('K')),0)
+    
+    xpos = np.linspace(-w/2,w/2,resolution[0])
+    ypos = np.linspace(-w/2,w/2,resolution[1])
+
+    if showy:
+        ex =  (-w/2, w/2, -w/2,w/2)
+        plt.xlabel('$x\:[pc]$')
+        plt.ylabel('$y\:[pc]$')
+        plt.imshow(T,extent=ex,norm=col.LogNorm())
+        plt.colorbar().set_label(r'$T(x,y)$  [K]')
+        return 'plotted'
+
+    return T, xpos, ypos
+    
 def fourier_model(x,*A):
     s = A[0]
     for i in range(int((len(A)-1)/2)):
@@ -281,16 +325,11 @@ def fourier_model(x,*A):
     for i in range(int((len(A)-1)/2)+1,len(A)):
         s = s + A[i]*np.sin((i+1)*x)
     return s
-
+        
 def r_squared(ydata,yest):
     squared = np.sum((ydata-yest)**2)
     tot = np.sum((ydata-np.mean(ydata))**2)
     return 1 - squared/tot
-
-def xi_squared(ydata,yest):
-    res = (ydata-yest)**2
-    return np.sum(res/yest)
-        
     
 def fourier_quality(dens,xpos,ypos,fou_deg=4,bins=20,bins2='None',showy=False,profs=[]):
 #With this function we measure the fourier modes for the surf-density isocurves
@@ -331,21 +370,31 @@ def fourier_quality(dens,xpos,ypos,fou_deg=4,bins=20,bins2='None',showy=False,pr
         a_guess = a0/np.geomspace(10,100**fou_deg,fou_deg)
         A = np.array((a0,*a_guess,*a_guess))
         
-        if ((type(bins2)==int) & (bins2>3*fou_deg)):
+        if type(bins2) == int:
+#            print(np.size(phi),' is the size of phi')
             bin_dens = []
+            bin_error = []
             binned_phi = np.linspace(0,2*np.pi,bins2)
+            obj_phi = []
             for m in range(bins2-1):
-                M = np.where((phi<=binned_phi[m+1]) & (phi>binned_phi[m]))
-                bin_dens.append(np.mean(dens[xpos[xi[M]],ypos[yi[M]]]))
+                M = np.where((phi<=binned_phi[m+1]) & (phi>=binned_phi[m]))
+                # print(M,' is M')
+                # print(dens[[xi[M]],[yi[M]]],' dens')
+                if np.isnan(np.mean(dens[[xi[M]],[yi[M]]])) == False:
+                    bin_dens.append(np.mean(dens[[xi[M]],[yi[M]]]))
+                    bin_error.append(np.std(dens[[xi[M]],[yi[M]]]))
+                    obj_phi.append((binned_phi[m+1]+binned_phi[m])/2)
+
             bin_dens = np.array(bin_dens)
-            vals2.append(curve_fit(fourier_model,binned_phi,bin_dens,p0=A)[0])
+            obj_phi = np.array(obj_phi)
+            vals2.append(curve_fit(fourier_model,obj_phi,bin_dens,p0=A)[0])
                 
         vals.append(curve_fit(fourier_model, phi, dens[xi,yi],p0=A)[0])
         robj[i] = (R[i+1]+R[i])/2
         
         if np.size(np.where(K==i)[0])==1:
             j = int(np.where(K==i)[0])
-            rtit = profs[j]
+#            rtit = profs[j]
             X = np.linspace(0,2*np.pi,200)
             Y = fourier_model(X,*vals[i])
             yest = fourier_model(np.array(phi),*vals[i])
@@ -353,35 +402,58 @@ def fourier_quality(dens,xpos,ypos,fou_deg=4,bins=20,bins2='None',showy=False,pr
             R1 = str(round(R[i],3))
             R2 = str(round(R[i+1],3))
             Rscore = str(round(yres,4))
-            plt.figure()
-            plt.title(r'profile for ' + str(rtit) + r'$\in$[' + R1 + ', '
-                      + R2 + '],' + ' with $R^2=$' + Rscore)
-            plt.xlabel(r'$\phi$')
-            plt.ylabel(r'Surface Density $\Sigma_R(\theta)\:\:\: \left[\frac{g}{cm^2}\right]$')
-            plt.plot(phi, dens[xi,yi], '.',color='blue',markersize=5)
-            plt.plot(X,Y,'red')
-            plt.legend(['values','fourier fit'])
-            plt.show()
-    
+            
+            if type(bins2) != int:            
+                plt.figure()
+                plt.title(r'profile for ' + '[' + R1 + ', '
+                          + R2 + '],' + r' with $R^2=$' + Rscore )
+                plt.xlabel(r'$\phi \:[Rad]$')
+                plt.ylabel(r'Surface Density $\Sigma_R(\theta)\:\:\: \left[\frac{g}{cm^2}\right]$')
+                plt.plot(phi, dens[xi,yi], '.',color='blue',markersize=5,xunits=radians)
+                plt.plot(X,Y,'red',xunits=radians)
+                plt.legend(['Values','Fourier fit'])
+                plt.show()
+            
+            if type(bins2) == int:
+                Y = fourier_model(X,*vals2[i])
+                plt.figure()
+                plt.title('Binned profile for ' + '[' + R1 + ', ' + R2 + ']')
+                plt.xlabel(r'$\phi \:[Rad]$')
+                plt.ylabel(r'Surface Density $\Sigma_R(\theta)\:\:\: \left[\frac{g}{cm^2}\right]$')
+                plt.plot(obj_phi, bin_dens, '.-',color='blue',markersize=5,xunits=radians)
+                plt.fill_between(obj_phi, bin_dens - bin_error, bin_dens + bin_error, alpha=0.2)
+                plt.plot(X,Y,'red',xunits=radians)
+                plt.legend(['Values','Fourier fit'])
+                plt.show()
+                
+
     vals = np.array(vals)
     if showy:
         plt.figure()
-        plt.yscale('log')
+        #plt.yscale('log')
         plt.xlabel('R [pc]')
-        plt.plot(robj,vals[:,0],label='a0')
+        plt.ylabel(r'Fourier mode strength $A_M(R)/A_0(R)$')
+        plt.xlim(0,robj[-1])
+        plt.ylim(0,1)
+#        colors = (get_cmap('Set1')).colors
+
+#        plt.plot(robj,vals[:,0],label='a0')
+        thresh = []
         for k in range(fou_deg):
-            plt.plot(robj,vals[:,k+1],label='a'+str(k+1))
-            plt.plot(robj,vals[:,k+5],label='b'+str(k+1))
-        plt.legend()
+            param = np.sqrt(vals[:,k+1]**2 + vals[:,k+5]**2)/vals[:,0]
+            plt.plot(robj,param,label=r'$\zeta$'+str(k+1))#='(a'+str(k+1)+' + b'+str(k+1)+')/2')
+#            plt.plot(robj,vals[:,k+5],label='b'+str(k+1))
+            thresh.append(np.where((param>0.05)&(robj>2))[0])
+        indices=thresh[0]
+        for i in range(1,fou_deg):
+            indices = np.union1d(indices,thresh[i])
+            
+        plt.axvspan(0,robj[indices[-1]+1],alpha=0.2,color='blue')        
+        plt.axvspan(robj[indices[-1]+1],robj[-1],alpha=0.25,color='yellow')
+        plt.legend(loc=1,labelspacing=1.18)
+        plt.title(r'Symmetry valid from $\hat{R} =$ '+str(round(robj[indices[-1]+1],3)))
         plt.show()
         return 'plotted'
+    
     return robj, vals
             
-    
-    
-
-
-
-    
-    
-    
