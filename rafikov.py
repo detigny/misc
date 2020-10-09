@@ -94,28 +94,9 @@ def radial_surf_dens(dens,xpos,ypos,bins=101,showy=False,m=5,Mswitch=False):
         avg_dens = np.sum(dens[xi,yi])/count
         dens_grid[i] = avg_dens
         if Mswitch:
+            #Mass inside rings, instead of Sigma
             dens_grid[i] = avg_dens*np.pi*(R[i+1]**2-R[i]**2)*4788
         robj[i] = (R[i+1]+R[i])/2
-
-    step = (bins-1)/4
-    step = int(step)
-    ministep = int(step/2)+1
-        
-    r1 = robj[:ministep]
-    d1 = dens_grid[:ministep]
-    r2 = robj[ministep-1:step]
-    d2 = dens_grid[ministep-1:step]
-    r3 = robj[step-1:2*step]
-    d3 = dens_grid[step-1:2*step]
-    r4 = robj[2*step-1:4*step]
-    d4 = dens_grid[2*step-1:4*step]
-    
-    #We do spline and differentiate in every interval
-    spl1 = UnivariateSpline(r1, d1, k=m)
-    spl2 = UnivariateSpline(r2, d2, k=m)
-    spl3 = UnivariateSpline(r3, d3, k=m)
-    spl4 = UnivariateSpline(r4, d4, k=m)
-    sg = np.concatenate((spl1(r1[:-1]),spl2(r2[:-1]),spl3(r3[:-1]),spl4(r4)))
 
     if showy:
         plt.figure()
@@ -124,27 +105,12 @@ def radial_surf_dens(dens,xpos,ypos,bins=101,showy=False,m=5,Mswitch=False):
 #        plt.ylim([1e-2,3])
         if Mswitch:
             plt.ylabel(r'$M(R)\:\:\:[M_\odot]$')
-#        plt.yscale('log')
-        
+#        plt.yscale('log')        
         plt.plot(robj,dens_grid,color='blue')
-        # plt.plot(r1,spl1(r1))
-        # plt.plot(r2,spl2(r2))
-        # plt.plot(r3,spl3(r3))
-        # plt.plot(r4,spl4(r4))
-#        plt.plot(robj,sg,color='red')
         plt.show()
         return 'plotted'
-
-    if (0 < R) | (R < r1[-1]):
-        return spl1(R)
-    elif (r2[0] <= R) | (R < r2[-1]):
-        return spl2(R)
-    elif (r3[0] <= R) | (R < r3[-1]):
-        return spl3(R)
-    elif (r4[0] <= R) | (R <= r4[-1]):
-        return spl4(R)
-    else:
-        return 'Seems like the radius is outside our range defined at the FRB'
+    
+    return robj, dens_grid
         
     
 
@@ -285,7 +251,7 @@ def r_der_omega(k, R, bins=101, resolution=[600,600], w=20, preload=False):
     else:
         return 'Seems like the radius is outside our range defined at the FRB'
     
-def temperature(k, resolution=[600,600], w=20, showy=False,gauss=False):
+def temp_map(k, resolution=[600,600], w=20, showy=False,gauss=False):
     
     nmbr = "000" + str(k+1)
     if len(str(k+1))==1:
@@ -294,9 +260,6 @@ def temperature(k, resolution=[600,600], w=20, showy=False,gauss=False):
         nmbr = '00'+str(k+1)
     ds = runner(nmbr)
     
-#Same rationale as with density, but here we integrate tangential velocity 
-#with a weighting by the density field and then normalizing. Omega is then
-#calculated in norm, by division of the radius
     width = (w,'pc')
     surf = ds.proj("temperature", 'z',weight_field='density')
     frb = surf.to_frb(width,resolution)
@@ -317,6 +280,60 @@ def temperature(k, resolution=[600,600], w=20, showy=False,gauss=False):
         return 'plotted'
 
     return T, xpos, ypos
+
+def radial_T(T, xpos,ypos,bins=101,showy=False,m=5,Mswitch=False):
+#way of defining and accessing Temperature through a radial parametrization
+#The interpolation is split in the same way than the other profiles Ive done
+    
+    w = np.max(xpos)-np.min(ypos)
+    rpc = np.zeros((np.size(xpos),np.size(ypos)))
+    for i in range(np.size(xpos)):
+        for j in range(np.size(ypos)):
+            rpc[i,j] = np.sqrt(xpos[i]**2 + ypos[j]**2) 
+
+    robj = np.zeros(bins-1)
+    T_grid = np.zeros(bins-1)
+    R = np.linspace(0,w/2,bins)
+    
+    for i in range(np.size(R)-1):
+        (xi,yi) = np.where((rpc<=R[i+1]) & (rpc>R[i]))
+        count = np.size(xi)
+        avg_T = np.sum(T[xi,yi])/count
+        T_grid[i] = avg_T
+        robj[i] = (R[i+1]+R[i])/2
+
+    if showy:
+        plt.figure()
+        plt.xlabel(r'$R\:\:\:[pc]$')
+        plt.ylabel(r'$\Sigma(R)\:\:\: \left[\frac{g}{cm^2}\right]$')
+#        plt.ylim([1e-2,3])
+        if Mswitch:
+            plt.ylabel(r'$M(R)\:\:\:[M_\odot]$')
+#        plt.yscale('log')
+        
+        plt.plot(robj,T_grid,color='blue')
+        # plt.plot(r1,spl1(r1))
+        # plt.plot(r2,spl2(r2))
+        # plt.plot(r3,spl3(r3))
+        # plt.plot(r4,spl4(r4))
+#        plt.plot(robj,sg,color='red')
+        plt.show()
+        return 'plotted'
+    return robj, T_grid
+
+def radial_profiler(R,robj,grid):
+    robj = np.array(robj)
+    minarg = np.argmin(np.abs(robj-R))
+    
+    if np.abs(R-robj[minarg+1])>np.abs(R-robj[minarg-1]):
+        secarg = minarg-1
+    elif np.abs(R-robj[minarg+1])<np.abs(R-robj[minarg-1]):
+        secarg = minarg+1
+    
+    w1 = np.abs(R-robj[minarg])
+    w2 = np.abs(R-robj[secarg])
+    return (w1*grid[minarg]+w2*grid[secarg])/np.abs(robj[minarg]-robj[secarg])
+
     
 def fourier_model(x,*A):
     s = A[0]
@@ -456,4 +473,20 @@ def fourier_quality(dens,xpos,ypos,fou_deg=4,bins=20,bins2='None',showy=False,pr
         return 'plotted'
     
     return robj, vals
-            
+
+def C_alpha(a):
+#The numerical constant comes from k/(4*sigma*mu) in cgs units
+    if (a<0.2)|(a>0.4):
+        print('Note that the alpha you are trying is outside the usual range')
+        
+    return np.ln(a*5.87e10)
+
+def opacity(R,switch=False):
+    kappa = 0.4
+    
+    if switch:
+        kff = 8e22
+        kappa = kff*radial_T(R)*radial_rho(R)
+    return kappa
+
+
